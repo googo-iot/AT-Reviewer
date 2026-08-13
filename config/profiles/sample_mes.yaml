@@ -1,0 +1,33 @@
+# 샘플 장비 2: MES 설비 이벤트 로그
+#   특징 - utf-8 인코딩, 탭 구분, 앞에 주석 2줄, 한글 컬럼명, 시각 형식이 두 가지
+#   대응 픽스처 - tests/fixtures/sample_mes.csv
+id: sample_mes
+name: MES 설비 이벤트 로그
+
+detect:
+  header_contains: ["사용자ID", "수행작업"]
+
+read:
+  encoding: utf-8
+  delimiter: "\t"      # tab 이라고 써도 된다
+  skip_rows: 2         # 앞의 내보내기 주석 2줄을 건너뛴다
+
+map:
+  # 이 장비는 한 파일 안에 시각 형식이 섞여 나온다 → 목록으로 지정
+  timestamp: {column: "발생일시", format: ["%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M"]}
+  actor:     {column: "사용자ID"}
+  action:    {column: "수행작업"}
+  target:    {column: "대상항목"}
+  old_value: {column: "변경전"}
+  new_value: {column: "변경후"}
+  reason:    {column: "사유"}
+
+vocabulary:
+  action:
+    "값변경": modify
+    "삭제": delete
+    "신규등록": create
+    "로그인": login
+    "로그아웃": login
+    "전자서명": sign
+    "설정변경": config

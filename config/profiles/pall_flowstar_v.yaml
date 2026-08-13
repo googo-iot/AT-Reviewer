@@ -1,0 +1,114 @@
+# Pall Flowstar V — System Audit Trail (PDF 내보내기)
+#
+# 형식: 구분선(긴 대시)으로 나뉜 '키: 값' 블록. CSV 가 아니다.
+#   Type:       Test results
+#   Action:     Test queued
+#   Details:    BP (#453)
+#   Test item:  MKPSD02        ← 선택적
+#   Repeat:     1              ← 선택적
+#   Signed by:  Yeong-sik No (20170202NYS)
+#   Date:       02.Jan.2026 08:27:47
+#   Comment:    ...            ← 드묾, 줄바꿈되어 나옴
+#
+# 이 장비에는 이전값/변경값 개념이 없어 map 에서 뺐다.
+
+id: pall_flowstar_v
+name: Pall Flowstar V 시스템 감사추적
+
+detect:
+  header_contains: ["Pall Flowstar V", "System Audit Trail"]
+
+read:
+  format: blocks
+  # 실제 파일은 en 대시(–) 78자. 하이픈/em 대시로 바뀌어도 걸리게 넉넉히 잡는다.
+  block_separator: "[-–—_]{20,}"
+  # 여기 적힌 이름만 '키'로 인정한다. 적지 않은 이름은 앞 값의 연속으로 붙는다.
+  fields:
+    - "Type"
+    - "Action"
+    - "Details"
+    - "Test item"
+    - "Repeat"
+    - "Signed by"
+    - "Date"
+    - "Comment"
+    - "Page"          # 페이지 머리글 블록을 골라내기 위해서만 등록
+  # 이 키들이 다 있어야 레코드로 인정 → 표지·머리글 블록이 걸러진다.
+  require_fields: ["Date", "Action"]
+  # 페이지마다 반복되는 머리글 블록(Software version / Serial number / Page)을 버린다.
+  skip_if_fields: ["Page"]
+
+map:
+  timestamp: {column: "Date", format: "%d.%b.%Y %H:%M:%S"}
+  actor:     {column: "Signed by"}
+  action:    {column: "Action"}
+  target:    {column: "Details"}
+  reason:    {column: "Comment"}
+  # 설정/프로그램 변경은 이전값·변경값이 Details 한 칸에 문장으로 묻혀 나온다.
+  #   설정변경   "... Now: All administrators Before: No administrators"
+  #   이름변경   "Test program: N/A2 Old program name: MKPSD02F1S"
+  # 문구가 두 갈래라 패턴도 두 갈래로 둔다. 먼저 걸리는 쪽의 값을 쓴다.
+  # 해당 없는 레코드는 비게 된다.
+  new_value:
+    column: "Details"
+    pattern: "Now:\\s*(.*?)\\s*(?:Before:|$)|Test program:\\s*(.*?)\\s+Old program name:"
+  old_value:
+    column: "Details"
+    pattern: "(?:Before:|Old program name:)\\s*(.*)$"
+
+vocabulary:
+  action:
+    # -- 시험 실행 (Type: Test results) ---------------------------------
+    "Test queued": execute
+    "Test started": execute
+    "Test completed and passed": execute
+    "Test completed and failed": execute
+    "Test completed and failed against limit": execute
+    "Test aborted": execute
+    "Test aborted by user": execute
+    "Test aborted with an error": execute
+    # -- 계정 / 접근 (Type: Users) --------------------------------------
+    "Successful login": login
+    "Logout": login
+    "Failed login": login_failed
+    # 반복 실패로 계정이 잠긴 경우. 단순 실패보다 강한 신호이므로 원본행위 컬럼에 남는다.
+    "Failed login (locked)": login_failed
+    # 존재하지 않는 ID 로 접근 시도 → 로그인 실패와 같은 성격의 신호다
+    "User not found": login_failed
+    "User created": create
+    "User deleted": delete
+    "User edited": modify
+    "Full name changed": modify
+    "User ID changed": modify
+    "Password changed": config
+    # -- 설정 / 프로그램 (Type: Settings, Test programs) ----------------
+    "Setting changed": config
+    "Program created": create
+    "Program edited": modify
+    "Program renamed": modify
+    "Program deleted": delete
+    # -- 기타 (Type: Other) ---------------------------------------------
+    "Full backup": backup
+    "Software update": config
+    "Import settings": config
+    "Import programs": create
+    "Import users": create
+
+# 이 장비의 출력 표. 장비마다 컬럼이 다르므로 여기서 정한다.
+#   from: 공통 스키마 이름(timestamp/actor/action/target/reason/equipment_id/
+#         source_name/line) 또는 원본 필드 이름(Type, Test item …)
+output:
+  columns:
+    - {name: "발생일시",   from: timestamp, format: "%Y-%m-%d %H:%M:%S"}
+    - {name: "구분",       from: "Type"}
+    - {name: "행위",       from: action}          # 공통 어휘로 정규화된 값
+    - {name: "원본행위",   from: "Action"}        # 장비가 쓴 원문
+    - {name: "행위자",     from: actor}
+    - {name: "대상",       from: "Details"}
+    - {name: "이전값",     from: old_value}
+    - {name: "변경값",     from: new_value}
+    - {name: "시험항목",   from: "Test item"}
+    - {name: "반복",       from: "Repeat"}
+    - {name: "비고",       from: "Comment"}
+    - {name: "원본파일",   from: source_name}
+    - {name: "원본줄번호", from: line}

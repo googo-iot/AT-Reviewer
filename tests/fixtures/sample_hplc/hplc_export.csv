@@ -1,0 +1,6 @@
+Date/Time,Changed By,Item Type,Item Name,Old Value,New Value,Reason
+02-Mar-24 09:12:04,hong.gd,Logon,System,,,
+02-Mar-24 23:41:07,kim.cs,Deleted,Peak Table,12.5,,
+03-Mar-24 01:15:22,kim.cs,Modified,"Calibration Curve, Level 3",0.9981,0.9997,
+03-Mar-24 08:05:00,lee.yh,Sign Off,Result Set 240302,,,검토 완료 승인
+03-Mar-24 08:44:19,admin,System Setting,Audit Trail,Enabled,Disabled,시스템 점검

@@ -1,0 +1,6 @@
+﻿발생일시,장비,행위자,행위,대상,이전값,변경값,사유,원본파일,원본행번호
+2024-03-02 09:12:04,sample_hplc,hong.gd,login,System,,,,hplc_export.csv,2
+2024-03-02 23:41:07,sample_hplc,kim.cs,delete,Peak Table,12.5,,,hplc_export.csv,3
+2024-03-03 01:15:22,sample_hplc,kim.cs,modify,"Calibration Curve, Level 3",0.9981,0.9997,,hplc_export.csv,4
+2024-03-03 08:05:00,sample_hplc,lee.yh,sign,Result Set 240302,,,검토 완료 승인,hplc_export.csv,5
+2024-03-03 08:44:19,sample_hplc,admin,config,Audit Trail,Enabled,Disabled,시스템 점검,hplc_export.csv,6

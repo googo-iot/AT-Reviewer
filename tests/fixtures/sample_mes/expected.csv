@@ -1,0 +1,6 @@
+﻿발생일시,장비,행위자,행위,대상,이전값,변경값,사유,원본파일,원본행번호
+2024-03-04 02:15:00,sample_mes,op01,modify,충전 노즐 온도,68.0,72.0,,mes_export.csv,4
+2024-03-04 07:58:12,sample_mes,op02,login,설비 콘솔,,,,mes_export.csv,5
+2024-03-04 08:30:00,sample_mes,op02,modify,배치 번호,B-2403-01,B-2403-02,오기입 정정,mes_export.csv,6
+2024-03-04 21:03:41,sample_mes,op03,delete,알람 이력,42건,,,mes_export.csv,7
+2024-03-05 03:20:00,sample_mes,admin,config,Audit Trail 기록,ON,OFF,,mes_export.csv,8

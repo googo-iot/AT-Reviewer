@@ -1,0 +1,9 @@
+﻿발생일시,구분,행위,원본행위,행위자,대상,이전값,변경값,시험항목,반복,비고,원본파일,원본줄번호
+2026-01-02 07:48:37,Test results,execute,Test queued,System,ST (#452),,,,,,audit_trail.txt,6
+2026-01-02 08:15:46,Users,login,Successful login,Yeong-sik No (20170202NYS),,,,,,,audit_trail.txt,13
+2026-01-03 08:00:27,Users,login_failed,Failed login,Cheun-hun Lee (19951103LCH),,,,,,,audit_trail.txt,20
+2026-01-05 07:48:02,Test results,execute,Test queued,Cheun-hun Lee (19951103LCH),BP (#461),,,MKPSD02,1,,audit_trail.txt,24
+2026-02-10 08:14:47,Test results,execute,Test queued,– No user –,ST (#522),,,,,,audit_trail.txt,39
+2026-02-19 10:56:55,Test results,execute,Test aborted by user,System,BP (#536),,,MKPSD02,,Incomplete tests aborted on power cycle,audit_trail.txt,42
+2026-04-14 09:12:00,Settings,config,Setting changed,Administrator (ADMIN),Allow admins to edit programs Now: All administrators Before: No administrators,No administrators,All administrators,,,,audit_trail.txt,57
+2026-02-03 09:23:28,Other,backup,Full backup,Su-min Yun (20190907YSM),,,,,,,audit_trail.txt,66

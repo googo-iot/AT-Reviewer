@@ -1,0 +1,111 @@
+Pall Flowstar V
+System Audit Trail
+
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Software version:
+2.2
+Serial number:
+19185550
+Date / Time:
+28.Jul.2026 14:37:06
+Page:
+1 of 2
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Test results
+Action:
+Test queued
+Details:
+ST (#452)
+Signed by:
+System
+Date:
+02.Jan.2026 07:48:37
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Users
+Action:
+Successful login
+Signed by:
+Yeong-sik No (20170202NYS)
+Date:
+02.Jan.2026 08:15:46
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Users
+Action:
+Failed login
+Signed by:
+Cheun-hun Lee (19951103LCH)
+Date:
+03.Jan.2026 08:00:27
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Test results
+Action:
+Test queued
+Details:
+BP (#461)
+Test item:
+MKPSD02
+Repeat:
+1
+Signed by:
+Cheun-hun Lee (19951103LCH)
+Date:
+05.Jan.2026 07:48:02
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Software version:
+2.2
+Serial number:
+19185550
+Date / Time:
+28.Jul.2026 14:37:06
+Page:
+2 of 2
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Test results
+Action:
+Test queued
+Details:
+ST (#522)
+Signed by:
+– No user – Date: 10.Feb.2026 08:14:47
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Test results
+Action:
+Test aborted by user
+Details:
+BP (#536)
+Test item:
+MKPSD02
+Signed by:
+System
+Date:
+19.Feb.2026 10:56:55
+Comment:
+Incomplete tests aborted on power
+cycle
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Settings
+Action:
+Setting changed
+Details:
+Allow admins to edit programs Now: All administrators Before: No administrators
+Signed by:
+Administrator (ADMIN)
+Date:
+14.Apr.2026 09:12:00
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+Type:
+Other
+Action:
+Full backup
+Signed by:
+Su-min Yun (20190907YSM)
+Date:
+03.Feb.2026 09:23:28
+––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––

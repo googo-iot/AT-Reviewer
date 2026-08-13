@@ -1,0 +1,61 @@
+# 위반 의심 탐지 규칙 설정
+#
+# 규칙은 공통 스키마만 보고 동작한다. 장비 종류를 알지 못한다.
+# 여기서 조정하는 것: 켜고 끄기 / 심각도 / 설명 / 임계값·키워드
+# 규칙 자체를 새로 만들 때만 src/core/rules.py 를 건드린다.
+#
+# severity: high | medium | low
+
+rules:
+  # ------------------------------------------------------------------
+  delete_without_reason:
+    enabled: true
+    severity: high
+    description: 사유 없는 삭제
+    # 사유 없는 삭제는 무엇이 왜 없어졌는지 사후 확인이 불가능하다.
+
+  # ------------------------------------------------------------------
+  after_hours_change:
+    enabled: true
+    severity: medium
+    description: 업무시간 외 변경·삭제
+    params:
+      start_hour: 22        # 이 시각부터
+      end_hour: 6           # 이 시각 전까지 (자정을 넘는 구간)
+      actions: [modify, delete]
+
+  # ------------------------------------------------------------------
+  audit_trail_disabled:
+    enabled: true
+    severity: high
+    description: 감사추적 기능 해제 정황
+    params:
+      # '감사추적'을 가리키는 낱말과 '끔'을 가리키는 낱말이 함께 나오면 걸린다.
+      subject_keywords: ["audit", "감사추적", "감사 추적"]
+      state_keywords: ["off", "disable", "disabled", "해제", "중지", "사용안함"]
+
+  # ------------------------------------------------------------------
+  system_clock_changed:
+    enabled: true
+    severity: high
+    description: 시스템 시각 변경
+    # 이전값·변경값이 둘 다 시각으로 읽히고 차이가 크면 걸린다.
+    # 낱말이 아니라 값의 성질로 판단하므로 장비가 뭐라고 부르든 잡힌다.
+    # 시각이 바뀌면 그 뒤의 모든 기록이 실제 순서와 어긋난다.
+    params:
+      min_shift_minutes: 5
+      # 값이 시각인지 판별할 때 시도할 형식 (장비마다 표기가 다르다)
+      time_formats:
+        - "%d.%b.%Y %H:%M:%S"
+        - "%Y-%m-%d %H:%M:%S"
+        - "%Y/%m/%d %H:%M:%S"
+        - "%d-%b-%Y %H:%M:%S"
+
+  # ------------------------------------------------------------------
+  repeated_login_failure:
+    enabled: true
+    severity: medium
+    description: 단기간 반복 로그인 실패
+    params:
+      threshold: 3          # 이 횟수에 도달하면 1건으로 보고
+      window_minutes: 30

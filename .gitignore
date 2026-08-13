@@ -1,0 +1,97 @@
+# ---------------------------------------------------------------
+# AT-Reviewer .gitignore
+# 원칙: 실제 장비 데이터는 절대 저장소에 들어가지 않는다.
+# ---------------------------------------------------------------
+
+# --- 데이터 파일 (최우선) -------------------------------------
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.xlsm
+*.pdf
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# --- 데이터/결과 디렉터리 --------------------------------------
+data/
+output/
+outputs/
+reports/
+samples/
+
+# --- 로컬 전용 설정 --------------------------------------------
+config/local*
+.env
+.env.*
+
+# --- 예외: 테스트 픽스처는 허용 -------------------------------
+# (앞선 *.csv 규칙보다 뒤에 와야 효력이 있음)
+!tests/fixtures/
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.tsv
+
+# --- Python ----------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- 가상환경 --------------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# --- 테스트 / 커버리지 -----------------------------------------
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- 타입체커 / 린터 -------------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+
+# --- 노트북 ----------------------------------------------------
+.ipynb_checkpoints/
+
+# --- 에디터 / OS ------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

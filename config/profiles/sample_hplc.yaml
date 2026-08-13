@@ -1,0 +1,33 @@
+# 샘플 장비 1: HPLC CDS 감사추적 내보내기
+#   특징 - cp949 인코딩, 콤마 구분, 헤더가 1행, 영문 컬럼명
+#   대응 픽스처 - tests/fixtures/sample_hplc.csv
+id: sample_hplc
+name: HPLC CDS 감사추적
+
+detect:
+  # 이 두 문구가 파일 앞부분에 모두 있으면 이 장비로 본다.
+  header_contains: ["Changed By", "Item Name"]
+
+read:
+  encoding: cp949
+  delimiter: ","
+  skip_rows: 0
+
+map:
+  timestamp: {column: "Date/Time", format: "%d-%b-%y %H:%M:%S"}
+  actor:     {column: "Changed By"}
+  action:    {column: "Item Type"}
+  target:    {column: "Item Name"}
+  old_value: {column: "Old Value"}
+  new_value: {column: "New Value"}
+  reason:    {column: "Reason"}
+
+vocabulary:
+  action:
+    "Modified": modify
+    "Deleted": delete
+    "Created": create
+    "Sign Off": sign
+    "Logon": login
+    "Logoff": login
+    "System Setting": config
