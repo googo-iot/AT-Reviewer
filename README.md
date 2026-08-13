@@ -14,7 +14,7 @@
 장비마다 형식이 제각각인 audit trail을 **하나의 공통 형식으로 변환**하고,
 **위반 의심 항목을 찾아내는** 것.
 
-두 가지를 한다.
+**창 프로그램(GUI)과 명령줄 둘 다 됩니다.** 처음이라면 GUI 쪽이 편합니다.
 
 | | 명령 | 결과 |
 |---|---|---|
@@ -41,7 +41,40 @@
 
 ---
 
-## 빠른 시작
+## 빠른 시작 — 창 프로그램
+
+**`AT-Reviewer.bat` 더블클릭** (또는 `python -m src.gui`)
+
+```
+1. 분석할 대상    [ data 폴더 고르기 ]   ☐ 하위 폴더 포함  ☑ 중복 제거
+2. 만들 산출물    ☑ 공통표 CSV  ☑ 위반내역 CSV  ☑ Excel(3시트)
+   저장 폴더      [ output ]      파일 이름 앞머리 [ 감사추적 ]
+
+   [실행] [중지]  ▓▓▓▓▓▓░░░░ 12/20
+   ┌ 진행 로그 ─────────────────────────┐
+   │ 2026-01.pdf              261건     │
+   │ ...                                │
+   └────────────────────────────────────┘
+   [산출물 폴더 열기]
+```
+
+- 처리는 별도 스레드에서 돌아 창이 멈추지 않는다. **중지**를 누르면 처리 중인 파일을 끝내고 멈춘다 (그때는 산출물을 만들지 않는다).
+- 마지막에 쓴 설정은 `config/local_gui.json` 에 기억된다 (gitignore 대상).
+- 산출물 이름은 `<앞머리>.csv` / `<앞머리>_위반내역.csv` / `<앞머리>_분석.xlsx` / `<앞머리>_중복.csv` / `<앞머리>_실패.csv`.
+
+### 아이콘 바꾸기
+
+`assets/icon.png` 를 갈아끼우고 아래를 돌린다. 창·작업표시줄용 크기 7종이 한 파일에 들어간다.
+
+```bash
+.venv/Scripts/python.exe tools/make_icon.py     # icon.png → icon.ico
+```
+
+`.ico` 가 있으면 그것을, 없으면 `.png` 를 쓴다. 둘 다 없거나 깨져도 프로그램은 그냥 뜬다.
+
+---
+
+## 빠른 시작 — 명령줄
 
 ```bash
 # 1. 의존성
@@ -112,6 +145,7 @@ $ python -m src.cli check data -o "output/위반내역.csv"
 
 1. `python -m src.cli inspect <새파일>` 로 어떤 프로파일에도 안 걸리는 것을 확인한다.
 2. `config/profiles/<장비id>.yaml` 을 한 장 쓴다. **Python은 건드리지 않는다.**
+   (원본이 실제로 어떻게 읽히는지는 `inspect <파일> --text` 로 본다)
 3. `python -m src.cli convert <새파일>` 로 돌린다. 미매핑 값은 에러가 *어디를 고칠지* 알려준다.
 
 <details>
@@ -262,10 +296,12 @@ map:
 AT-Reviewer/
 ├─ src/
 │  ├─ cli.py                  명령줄 진입점 (convert / check / analyze / profiles / inspect)
+│  ├─ gui.py                  창 프로그램 (tkinter)
 │  └─ core/
 │     ├─ schema.py            공통 스키마 AuditEvent — 표준 라이브러리만 사용
 │     ├─ profile.py           프로파일 로더 + 파서 (delimited / blocks / PDF)
 │     ├─ registry.py          장비 자동 판별, 입력 파일 수집
+│     ├─ pipeline.py          처리 절차 (CLI 와 GUI 가 같은 것을 쓴다)
 │     ├─ rules.py             위반 규칙 (규칙 하나당 함수 하나)
 │     ├─ excel.py             Excel 산출물 (서식은 전부 여기서 책임진다)
 │     └─ export.py            표 출력, 중복 판정
@@ -276,8 +312,11 @@ AT-Reviewer/
 │  ├─ conftest.py             프로파일·픽스처 자동 수집
 │  ├─ test_profiles.py        모든 프로파일 구조 검증 (자동 확장)
 │  ├─ test_fixtures.py        픽스처 파싱 검증 (자동 확장)
-│  ├─ test_schema.py / test_rules.py / test_export.py / test_excel.py
+│  ├─ test_schema.py / test_rules.py / test_export.py / test_excel.py / test_gui.py
 │  └─ fixtures/<장비id>/      입력 + expected.csv
+├─ AT-Reviewer.bat            창 프로그램 실행 (더블클릭)
+├─ assets/                    창 아이콘 (icon.png / icon.ico)
+├─ tools/make_icon.py         png → ico 변환
 ├─ data/                      분석 대상 (저장소에 올라가지 않음)
 └─ output/                    산출물 (저장소에 올라가지 않음)
 ```
@@ -291,7 +330,8 @@ python -m src.cli convert <경로> [-o 산출물.csv]     표로 변환
 python -m src.cli check   <경로> [-o 위반내역.csv]   변환 후 규칙 적용
 python -m src.cli analyze <경로> [-o 분석.xlsx]      변환 + 검사를 Excel 한 권으로
 python -m src.cli profiles                          등록된 프로파일 목록
-python -m src.cli inspect <파일>                    이 파일이 어느 프로파일에 걸리는지
+python -m src.cli inspect <파일> [--text N]          어느 프로파일에 걸리는지 (+ 원본 본문 N줄)
+python -m src.gui                                   창 프로그램
 ```
 
 ### Excel 산출물 (`analyze`)
@@ -342,7 +382,7 @@ python -m src.cli inspect <파일>                    이 파일이 어느 프�
 ## 개발
 
 ```bash
-.venv/Scripts/python.exe -m pytest          # 116 passed, 4 skipped
+.venv/Scripts/python.exe -m pytest          # 123 passed, 4 skipped
 ```
 
 테스트 픽스처(`tests/fixtures/`)는 **합성 데이터**다.

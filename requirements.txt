@@ -5,3 +5,4 @@ PyYAML>=6.0        # 장비 프로파일 / 규칙 설정 로딩
 pandas>=2.2        # 결과 집계 및 Excel 출력
 openpyxl>=3.1      # pandas의 .xlsx 엔진
 pytest>=8.0        # 테스트
+Pillow>=10.0       # 아이콘 변환(tools/make_icon.py)에만 필요
