@@ -64,11 +64,18 @@
 
 ### 아이콘 바꾸기
 
-`assets/icon.png` 를 갈아끼우고 아래를 돌린다. 창·작업표시줄용 크기 7종이 한 파일에 들어간다.
+`assets/icon.png` 를 갈아끼우고 아래를 돌린다.
 
 ```bash
-.venv/Scripts/python.exe tools/make_icon.py     # icon.png → icon.ico
+.venv/Scripts/python.exe tools/make_icon.py     # icon.png → icon.ico + 미리보기
 ```
+
+크기 7종(16~256px)이 한 파일에 들어가고, `output/icon_preview.png` 로 결과를 눈으로 확인할 수 있다.
+
+**작은 크기에는 다른 도안이 들어간다.** 글자가 캔버스의 1/4쯤인 도안은
+16px 아이콘에서 글자 높이가 4px 밖에 안 되어 판독이 안 된다. 원본을 4000px 로
+그려도 마찬가지다. 그래서 48px 미만에는 그림을 빼고 글자만 채운 판을 자동으로 만든다
+(Windows 기본 아이콘들이 쓰는 방식). 직접 만든 판을 쓰려면 `assets/icon_small.png` 를 두면 된다.
 
 `.ico` 가 있으면 그것을, 없으면 `.png` 를 쓴다. 둘 다 없거나 깨져도 프로그램은 그냥 뜬다.
 
