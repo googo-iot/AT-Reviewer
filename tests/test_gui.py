@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import queue
+import sys
 from pathlib import Path
 
 import pytest
@@ -159,5 +160,33 @@ def test_broken_icon_is_ignored(monkeypatch, tmp_path) -> None:
         pytest.skip("화면이 없는 환경입니다")
     try:
         assert gui.apply_icon(root) == ""      # 예외 없이 조용히 넘어가야 한다
+    finally:
+        root.destroy()
+
+
+def test_icon_handles_are_set_on_windows(tmp_path) -> None:
+    """작업표시줄 아이콘은 iconbitmap 만으로는 부족하다.
+
+    tkinter 의 iconbitmap 만 쓰면 Windows 가 16px 짜리를 24px 로 늘려 그려
+    뭉개진다. 크기별 아이콘을 직접 붙였는지 확인한다.
+    """
+    from src import gui
+
+    if sys.platform != "win32":
+        pytest.skip("Windows 전용")
+    if not gui.ICON_ICO.is_file():
+        pytest.skip("아이콘이 없습니다")
+
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("화면이 없는 환경입니다")
+    try:
+        root.withdraw()
+        assert gui.apply_icon(root) == gui.ICON_ICO.name
+        handles = getattr(root, "_icon_handles", [])
+        assert len(handles) == 2, "작은 아이콘·큰 아이콘 둘 다 붙어야 한다"
+        assert all(h for h in handles)
     finally:
         root.destroy()

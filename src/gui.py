@@ -543,6 +543,38 @@ class App:
         self.root.destroy()
 
 
+def _set_windows_icons(root: Tk, path: Path) -> bool:
+    """Windows 에 큰 아이콘·작은 아이콘을 크기별로 직접 지정한다.
+
+    tkinter 의 iconbitmap 만 쓰면 Windows 가 16px 짜리를 집어
+    작업표시줄 크기(24px)로 '늘려서' 그린다. 확대라서 무조건 뭉개진다.
+    LoadImage 로 원하는 크기를 정확히 꺼내 WM_SETICON 으로 붙이면
+    작업표시줄이 큰 아이콘(32px)을 줄여 쓰게 되어 훨씬 또렷하다.
+    """
+    import ctypes
+
+    IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON = 1, 0x0010, 0x0080
+    ICON_SMALL, ICON_BIG = 0, 1
+
+    user32 = ctypes.windll.user32
+    root.update_idletasks()                   # 창이 실제로 만들어져야 핸들이 생긴다
+    try:
+        hwnd = int(root.wm_frame(), 16)
+    except (ValueError, Exception):
+        return False
+
+    ok = False
+    for size, which in ((16, ICON_SMALL), (32, ICON_BIG)):
+        handle = user32.LoadImageW(
+            None, str(path), IMAGE_ICON, size, size, LR_LOADFROMFILE
+        )
+        if handle:
+            user32.SendMessageW(hwnd, WM_SETICON, which, handle)
+            root._icon_handles = getattr(root, "_icon_handles", []) + [handle]
+            ok = True
+    return ok
+
+
 def apply_icon(root: Tk) -> str:
     """창 아이콘을 붙인다. 무엇을 썼는지 돌려준다 ('' 이면 못 붙인 것).
 
@@ -550,7 +582,8 @@ def apply_icon(root: Tk) -> str:
     """
     if sys.platform == "win32" and ICON_ICO.is_file():
         try:
-            root.iconbitmap(default=str(ICON_ICO))
+            root.iconbitmap(default=str(ICON_ICO))     # 창 왼쪽 위 / 대화상자용
+            _set_windows_icons(root, ICON_ICO)         # 작업표시줄용
             return ICON_ICO.name
         except Exception:
             pass                              # .ico 가 깨졌으면 png 로 넘어간다
@@ -570,7 +603,24 @@ def apply_icon(root: Tk) -> str:
     return ""
 
 
+def _claim_taskbar_identity() -> None:
+    """작업표시줄에서 파이썬이 아니라 이 프로그램으로 묶이게 한다.
+
+    이걸 안 하면 Windows 가 pythonw.exe 로 묶어 파이썬 아이콘을 쓸 수 있다.
+    창을 만들기 전에 불러야 한다.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AT-Reviewer.GUI")
+    except Exception:
+        pass
+
+
 def main() -> int:
+    _claim_taskbar_identity()
     root = Tk()
     try:
         ttk.Style().theme_use("vista")     # Windows 기본 테마가 더 보기 좋다
