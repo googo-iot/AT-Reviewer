@@ -32,8 +32,9 @@ SOURCE_SMALL = ASSETS / "icon_small.png"      # 있으면 작은 크기에 이�
 TARGET = ASSETS / "icon.ico"
 PREVIEW = PROJECT_ROOT / "output" / "icon_preview.png"
 
-#: Windows 가 실제로 골라 쓰는 크기들.
-SIZES = (16, 24, 32, 48, 64, 128, 256)
+#: Windows 가 골라 쓰는 크기들. 화면 배율(100/125/150/175/200%)마다 요구 크기가 다르고,
+#: 딱 맞는 크기가 없으면 다른 크기를 늘려 쓰면서 흐려진다. 그래서 촘촘히 넣는다.
+SIZES = (16, 20, 24, 30, 32, 36, 40, 48, 64, 96, 128, 256)
 
 #: 이 크기 미만에서는 단순화한 도안을 쓴다.
 SIMPLIFY_BELOW = 48
@@ -41,13 +42,17 @@ SIMPLIFY_BELOW = 48
 #: 작은 크기 판에 넣을 글자.
 SMALL_TEXT = "ATR"
 
-#: 굵은 글꼴 후보. 작은 크기에서는 가는 획이 사라지므로 굵어야 한다.
+#: 글꼴 후보. Bold 를 먼저 쓴다 — Black 은 너무 굵어서 작은 크기에서
+#: A·R 안쪽 구멍이 메워지고 오히려 뭉개져 보인다.
 FONT_CANDIDATES = (
-    "C:/Windows/Fonts/seguibl.ttf",     # Segoe UI Black
     "C:/Windows/Fonts/segoeuib.ttf",    # Segoe UI Bold
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/verdanab.ttf",
+    "C:/Windows/Fonts/seguibl.ttf",     # Segoe UI Black (마지막 수단)
 )
+
+#: 글자가 판 가로에서 차지할 비율. 더 키우면 판 밖으로 넘친다.
+TEXT_RATIO = 0.84
 
 
 # --------------------------------------------------------------------------
@@ -86,40 +91,46 @@ def sample_colors(image) -> tuple[tuple[int, int, int, int], tuple[int, int, int
 
 
 def build_small_tile(size: int, background, foreground):
-    """글자만 크게 채운 정사각 판. 작은 크기에서 판독되는 것이 유일한 목표다."""
+    """글자만 크게 채운 정사각 판. 작은 크기에서 판독되는 것이 유일한 목표다.
+
+    크게 그린 뒤 줄이지 않고 목표 크기에 바로 그린다.
+    축소를 거치면 획 가장자리에 회색이 번져 흐려 보인다.
+    바로 그리면 글꼴 힌팅이 획을 픽셀 격자에 맞춰줘 또렷해진다.
+    """
     from PIL import Image, ImageDraw, ImageFont
 
-    scale = 8                                    # 계단 현상을 줄이려고 크게 그린 뒤 줄인다
-    canvas = size * scale
-    tile = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+    tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(tile)
     draw.rounded_rectangle(
-        [0, 0, canvas - 1, canvas - 1], radius=int(canvas * 0.19), fill=background
+        [0, 0, size - 1, size - 1], radius=max(2, round(size * 0.19)), fill=background
     )
 
     font_path = next((p for p in FONT_CANDIDATES if Path(p).is_file()), None)
     if font_path is None:                        # 글꼴이 없으면 판만이라도 만든다
-        return tile.resize((size, size), Image.LANCZOS)
+        return tile
 
-    # 글자가 판의 가로 76% 를 채우는 크기를 찾는다.
-    target_width = canvas * 0.76
-    points = int(canvas * 0.5)
-    for _ in range(40):
+    # 판을 넘지 않는 선에서 가장 큰 글자 크기를 찾는다.
+    # 한 칸씩 키우다가 넘치기 직전 것을 쓴다 — 넘치면 글자가 잘린다.
+    chosen = None
+    for points in range(max(4, round(size * 0.35)), size * 2):
         font = ImageFont.truetype(font_path, points)
-        left, top, right, bottom = draw.textbbox((0, 0), SMALL_TEXT, font=font)
-        if right - left >= target_width or points > canvas:
+        box = draw.textbbox((0, 0), SMALL_TEXT, font=font)
+        width, height = box[2] - box[0], box[3] - box[1]
+        if width > size * TEXT_RATIO or height > size * 0.66:
             break
-        points += max(1, int(points * 0.06))
+        chosen = (font, box)
+    if chosen is None:                           # 판이 너무 작아 글자가 안 들어간다
+        return tile
 
-    font = ImageFont.truetype(font_path, points)
-    left, top, right, bottom = draw.textbbox((0, 0), SMALL_TEXT, font=font)
+    font, (left, top, right, bottom) = chosen
     draw.text(
-        ((canvas - (right - left)) / 2 - left, (canvas - (bottom - top)) / 2 - top),
+        (round((size - (right - left)) / 2) - left,
+         round((size - (bottom - top)) / 2) - top),
         SMALL_TEXT,
         font=font,
         fill=foreground,
     )
-    return tile.resize((size, size), Image.LANCZOS)
+    return tile
 
 
 # --------------------------------------------------------------------------
