@@ -34,8 +34,12 @@ def test_id_matches_filename(profile: Profile) -> None:
 
 @pytest.mark.parametrize("profile", PROFILES, ids=IDS)
 def test_detect_is_specific(profile: Profile) -> None:
-    assert profile.header_contains, "판별 조건이 없으면 아무 파일에나 걸린다"
-    assert all(t.strip() for t in profile.header_contains)
+    """판별 조건이 없으면 아무 파일에나 걸린다.
+
+    DB 는 본문을 글자로 훑을 수 없어 테이블 이름으로 판별한다.
+    """
+    assert profile.detect_tokens, "판별 조건이 비어 있습니다"
+    assert all(t.strip() for t in profile.detect_tokens)
 
 
 @pytest.mark.parametrize("profile", PROFILES, ids=IDS)
@@ -88,7 +92,7 @@ def test_detect_conditions_do_not_collide() -> None:
     """두 프로파일의 판별 조건이 완전히 같으면 어떤 파일이든 반드시 중복 매칭된다."""
     seen: dict[frozenset[str], str] = {}
     for profile in PROFILES:
-        key = frozenset(t.lower() for t in profile.header_contains)
+        key = frozenset(t.lower() for t in profile.detect_tokens)
         assert key not in seen, (
             f"판별 조건이 '{seen.get(key)}' 와 완전히 같습니다: {profile.id}"
         )

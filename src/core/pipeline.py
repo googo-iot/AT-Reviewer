@@ -11,14 +11,42 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from .export import FailureRecord, deduplicate, overlap_summary, sort_events
 from .profile import Profile, ProfileError
 from .registry import DetectionError, Registry
 from .schema import AuditEvent
 
-__all__ = ["FileReport", "RunResult", "run"]
+__all__ = ["FileReport", "RunResult", "equipment_label", "run"]
+
+
+#: 설비명으로 보지 않는 폴더 이름. 여러 설비를 담는 통 폴더들이다.
+GENERIC_FOLDERS: frozenset[str] = frozenset(
+    {"data", "output", "logs", "log", "audit", "temp", "tmp",
+     "backup", "downloads", "download", "desktop", "documents"}
+)
+
+
+def equipment_label(path: Path, fallback: str) -> str:
+    """이 파일이 '어느 설비' 것인지 정한다. 파일이 든 폴더 이름을 쓴다.
+
+    프로파일은 '이 형식을 어떻게 읽는가'(기종)이고, 설비는 '어느 호기인가'다.
+    형식이 같은 설비가 여러 대면 이 둘이 갈라져야 한다.
+    실제로 SCADA 두 대가 파일명(SystemLog.db)까지 같아 구분이 안 됐다.
+
+        data/2026-01.pdf            → 'data' 는 통 폴더 → 프로파일 id
+        data/FIT-I001/2026-01.pdf   → 'FIT-I001'
+        data/ATM-I001/SystemLog.db  → 'ATM-I001'
+
+    파일을 설비별 폴더에 나눠 두는 것이 이미 하고 있는 정리 방식이라
+    따로 적어 넣을 것이 없다. 어느 경로를 지정하고 실행하든 결과가 같다
+    — 지정한 위치에 따라 설비명이 달라지면 산출물을 믿을 수 없다.
+    """
+    folder = Path(path).parent.name
+    if folder and folder.lower() not in GENERIC_FOLDERS:
+        return folder
+    return fallback
 
 
 @dataclass(slots=True)
@@ -52,6 +80,7 @@ class RunResult:
     removed: list[AuditEvent] = field(default_factory=list)
     overlaps: list[str] = field(default_factory=list)
     skipped: int = 0
+    excluded: int = 0            # 행위 종류로 걸러낸 건수
     total_files: int = 0
     cancelled: bool = False
 
@@ -82,19 +111,23 @@ def run(
     registry: Registry,
     *,
     dedupe: bool = True,
+    exclude_actions: Iterable[str] = (),
     on_file: Callable[[FileReport], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> RunResult:
     """파일들을 읽어 장비별 이벤트로 만든다.
 
-    on_file:    파일 하나를 끝낼 때마다 호출. 실패한 파일도 포함해서 부른다.
-    cancelled:  True 를 돌려주면 다음 파일로 넘어가지 않고 멈춘다.
+    on_file:         파일 하나를 끝낼 때마다 호출. 실패한 파일도 포함해서 부른다.
+    cancelled:       True 를 돌려주면 다음 파일로 넘어가지 않고 멈춘다.
+    exclude_actions: 이 행위는 산출물에서 뺀다. 장비 종류와 무관하게
+                     공통 어휘로 지정하므로 어떤 장비에나 같은 방식으로 걸린다.
 
     한 파일이 실패해도 나머지는 계속 처리한다 — 그래야 한 번 돌려서
     '무엇이 되고 무엇이 안 되는지'를 한꺼번에 볼 수 있다.
     """
     result = RunResult(total_files=len(files))
     grouped: dict[str, list[AuditEvent]] = {}
+    unwanted = {a.strip().lower() for a in exclude_actions if a and a.strip()}
 
     for path in files:
         if cancelled is not None and cancelled():
@@ -108,6 +141,10 @@ def run(
 
     # -- 정리 --------------------------------------------------------------
     for equipment_id, group in sorted(grouped.items()):
+        if unwanted:
+            before = len(group)
+            group = [e for e in group if e.action not in unwanted]
+            result.excluded += before - len(group)
         group = sort_events(group)
         if dedupe:
             group, removed = deduplicate(group)
@@ -126,7 +163,9 @@ def _read_one(
     result: RunResult,
 ) -> FileReport:
     try:
-        profile, parsed = registry.read(path)
+        profile = registry.identify(path)
+        label = equipment_label(path, profile.id)
+        profile, parsed = registry.read(path, equipment_id=label)
     except DetectionError as exc:
         result.failures.append(
             FailureRecord(source_file=path.name, stage="detect", message=str(exc))
@@ -146,8 +185,9 @@ def _read_one(
         registry.forget(path)
 
     result.skipped += parsed.skipped
-    result.profiles[profile.id] = profile
-    grouped.setdefault(profile.id, []).extend(parsed.events)
+    # 산출물은 설비 단위로 나눈다. 읽는 규칙(프로파일)은 여러 설비가 공유할 수 있다.
+    result.profiles[label] = profile
+    grouped.setdefault(label, []).extend(parsed.events)
     for row_error in parsed.errors:
         result.failures.append(
             FailureRecord(
@@ -164,7 +204,7 @@ def _read_one(
         name=path.name,
         path=path,
         status="ok",
-        profile_id=profile.id,
+        profile_id=label,
         events=len(parsed.events),
         errors=len(parsed.errors),
         skipped=parsed.skipped,

@@ -11,6 +11,8 @@ import pytest
 
 from src.core.rules import (
     RULES,
+    account_created,
+    account_unlocked,
     RuleError,
     after_hours_change,
     audit_trail_disabled,
@@ -298,3 +300,80 @@ def test_evaluate_applies_severity_and_sorts_by_it() -> None:
     findings = evaluate(events, load_rules(RULES_FILE))
     assert [f.severity for f in findings] == ["high", "medium"]
     assert all(f.description for f in findings)
+
+
+# --------------------------------------------------------------------------
+# account_unlocked
+# --------------------------------------------------------------------------
+
+
+def test_unlock_is_flagged() -> None:
+    """계정은 여러 번 틀려야 잠긴다. 해제 기록은 그 앞에 실패가 있었다는 흔적이다."""
+    hit = event(action="config", target="UnLock Login (ID:LEVEL3)", actor="20130113")
+    found = list(account_unlocked([hit], {}))
+
+    assert len(found) == 1
+    assert "20130113" in found[0].evidence
+
+
+def test_unlock_detected_in_raw_when_target_is_empty() -> None:
+    hit = event(action="config", raw={"LOG_MSG": "UnLock Login (ID:20240403)"})
+    assert list(account_unlocked([hit], {}))
+
+
+def test_korean_keyword_is_detected() -> None:
+    hit = event(action="config", target="사용자 계정 잠금 해제")
+    assert list(account_unlocked([hit], {}))
+
+
+def test_door_unlock_is_not_account_unlock() -> None:
+    """'해제' 낱말만 보면 설비 동작까지 걸린다. 실제로 겪은 오탐이다."""
+    door = event(action="operate", target="DOORS UNLOCK 기능이 활성화 되었습니다.")
+    assert not list(account_unlocked([door], {}))
+
+
+def test_ordinary_login_is_not_flagged() -> None:
+    assert not list(account_unlocked([event(action="login", target="Login - ID: a")], {}))
+
+
+def test_unlock_keywords_are_configurable() -> None:
+    hit = event(action="config", target="계정 복구 처리")
+    assert not list(account_unlocked([hit], {}))
+    assert list(account_unlocked([hit], {"keywords": ["계정 복구"]}))
+
+
+# --------------------------------------------------------------------------
+# account_created
+# --------------------------------------------------------------------------
+
+
+def test_account_creation_is_flagged() -> None:
+    hit = event(action="create", target="<Menu> Security Table - New user : 20130404",
+                actor="admin")
+    found = list(account_created([hit], {}))
+
+    assert len(found) == 1
+    assert "admin" in found[0].evidence
+
+
+def test_program_creation_is_not_account_creation() -> None:
+    """같은 create 에 프로그램 생성·레시피 임포트가 함께 들어온다."""
+    program = event(action="create", target="Test program: SCS92SP71S",
+                    raw={"Action": "Program created"})
+    assert not list(account_created([program], {}))
+
+
+def test_bulk_user_import_counts_as_account_creation() -> None:
+    """계정을 한꺼번에 들여오는 것도 권한 부여다."""
+    bulk = event(action="create", target="12 imported", raw={"Action": "Import users"})
+    assert list(account_created([bulk], {}))
+
+
+def test_non_create_actions_are_ignored() -> None:
+    assert not list(account_created([event(action="modify", target="User level")], {}))
+
+
+def test_account_keywords_are_configurable() -> None:
+    hit = event(action="create", target="신규 작업자 등록")
+    assert not list(account_created([hit], {}))
+    assert list(account_created([hit], {"subject_keywords": ["작업자"]}))

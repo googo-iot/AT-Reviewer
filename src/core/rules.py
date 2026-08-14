@@ -25,6 +25,8 @@ from .schema import AuditEvent
 
 __all__ = [
     "Finding",
+    "account_created",
+    "account_unlocked",
     "RULES",
     "RuleError",
     "RuleSpec",
@@ -234,6 +236,72 @@ def system_clock_changed(
         )
 
 
+def account_created(
+    events: Sequence[AuditEvent], params: dict[str, Any]
+) -> Iterator[Finding]:
+    """계정을 새로 만든 기록.
+
+    계정 생성은 곧 접근 권한 부여다. 정당한 절차를 거쳤는지,
+    실제로 쓰이는 사람인지 확인이 필요하다.
+
+    action 이 create 인 것만으로는 안 된다 — 같은 create 에
+    프로그램 생성, 레시피 임포트 같은 것이 함께 들어온다.
+    계정을 가리키는 낱말이 있을 때만 인정한다.
+    """
+    actions = set(_as_lower_list(params.get("actions"), ("create",)))
+    subjects = _as_lower_list(
+        params.get("subject_keywords"), ("user", "account", "계정", "사용자")
+    )
+    for event in events:
+        if event.action not in actions:
+            continue
+        # 컬럼명은 빼고 값만 본다 (컬럼명에 user 가 있는 장비가 있다).
+        haystack = f"{event.target} {event.raw_values()}".lower()
+        if any(word in haystack for word in subjects):
+            yield Finding(
+                rule="account_created",
+                severity="",
+                description="",
+                event=event,
+                evidence=f"'{event.target or '(대상 미기재)'}' — 생성자 {event.actor}",
+            )
+
+
+def account_unlocked(
+    events: Sequence[AuditEvent], params: dict[str, Any]
+) -> Iterator[Finding]:
+    """잠긴 계정을 푼 기록.
+
+    계정은 로그인을 여러 번 틀려야 잠긴다. 따라서 잠금 해제 기록은
+    '그 앞에 실패가 있었다'는 흔적이다. 장비에 따라 실패 자체는
+    남기지 않고 해제만 남기는 경우가 있어(SCADA 가 그렇다),
+    이 규칙이 없으면 그 구간이 통째로 안 보인다.
+    """
+    release_words = _as_lower_list(
+        params.get("keywords"), ("unlock", "잠금 해제", "잠금해제", "잠금해지")
+    )
+    # '해제' 낱말만 보면 도어 잠금 해제 같은 것까지 걸린다
+    # (실제로 'DOORS UNLOCK 기능이 활성화 되었습니다' 가 10건 잡혔다).
+    # 계정을 가리키는 낱말이 함께 있을 때만 인정한다.
+    account_words = _as_lower_list(
+        params.get("subject_keywords"),
+        ("login", "account", "user", "id:", "계정", "사용자"),
+    )
+    for event in events:
+        # 컬럼명은 빼고 값만 본다. raw_text() 를 쓰면 'user_id' 같은
+        # 컬럼명 때문에 모든 행이 계정 관련으로 보인다.
+        haystack = f"{event.target} {event.new_value or ''} {event.raw_values()}".lower()
+        hit = next((word for word in release_words if word in haystack), None)
+        if hit and any(word in haystack for word in account_words):
+            yield Finding(
+                rule="account_unlocked",
+                severity="",
+                description="",
+                event=event,
+                evidence=f"'{event.target or hit}' — 해제자 {event.actor}",
+            )
+
+
 def repeated_login_failure(
     events: Sequence[AuditEvent], params: dict[str, Any]
 ) -> Iterator[Finding]:
@@ -275,6 +343,8 @@ RULES: Final[dict[str, Callable[..., Iterator[Finding]]]] = {
     "delete_without_reason": delete_without_reason,
     "after_hours_change": after_hours_change,
     "audit_trail_disabled": audit_trail_disabled,
+    "account_created": account_created,
+    "account_unlocked": account_unlocked,
     "system_clock_changed": system_clock_changed,
     "repeated_login_failure": repeated_login_failure,
 }

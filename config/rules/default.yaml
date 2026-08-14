@@ -52,6 +52,32 @@ rules:
         - "%d-%b-%Y %H:%M:%S"
 
   # ------------------------------------------------------------------
+  account_created:
+    enabled: true
+    severity: high
+    description: 계정 생성
+    # 계정 생성은 곧 접근 권한 부여다.
+    # action 이 create 인 것만 보면 프로그램 생성·레시피 임포트까지 걸리므로,
+    # 계정을 가리키는 낱말이 함께 있을 때만 인정한다.
+    params:
+      actions: ["create"]
+      subject_keywords: ["user", "account", "계정", "사용자"]
+
+  # ------------------------------------------------------------------
+  account_unlocked:
+    enabled: true
+    severity: high
+    description: 계정 잠금 해제
+    # 계정은 로그인을 여러 번 틀려야 잠긴다. 해제 기록은 그 앞에 실패가
+    # 있었다는 흔적이다. 실패 자체는 안 남기고 해제만 남기는 장비가 있어
+    # (SCADA 가 그렇다) 이 규칙이 없으면 그 구간이 통째로 안 보인다.
+    params:
+      # 두 갈래가 함께 나와야 걸린다. '해제' 낱말만 보면
+      # 도어 잠금 해제 같은 설비 동작까지 잡힌다.
+      keywords: ["unlock", "잠금 해제", "잠금해제", "잠금해지"]
+      subject_keywords: ["login", "account", "user", "id:", "계정", "사용자"]
+
+  # ------------------------------------------------------------------
   repeated_login_failure:
     enabled: true
     severity: medium

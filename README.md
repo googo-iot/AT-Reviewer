@@ -184,7 +184,17 @@ login_failed|modify|sign> 을 추가하세요.
 
 ## 프로파일 YAML
 
-장비 하나 = YAML 한 장. 입력 형식 두 가지를 지원한다.
+장비 하나 = YAML 한 장. 입력 형식 **네 가지**를 지원한다.
+
+| `read.format` | 대상 | 판별 기준 |
+|---|---|---|
+| `delimited` | CSV / TSV | `detect.header_contains` |
+| `blocks` | PDF 등 구분선 리포트 | `detect.header_contains` |
+| `sqlite` | `.db` `.sqlite` | `detect.tables` |
+| `access` | `.mdb` `.accdb` | `detect.tables` |
+
+**파일 형태는 판별 기준이 아니다.** 그건 바이트를 어떻게 읽을지만 정한다.
+어느 장비인지는 내용(문구·테이블 이름)으로 가른다.
 
 ### `delimited` — 구분자 표 (CSV/TSV)
 
@@ -227,6 +237,45 @@ read:
   skip_if_fields: ["Page"]            # 페이지 머리글 제거
 ```
 
+### `sqlite` — SQLite 파일
+
+```yaml
+read:
+  format: sqlite
+  query: |
+    SELECT ts, user_id, action_code FROM audit_log ORDER BY ts
+```
+
+원본은 절대 건드리지 않는다. **`-wal` 파일이 옆에 있으면 한 벌을 임시 폴더로 복사해서 읽는다**
+— 최근 기록이 본 파일이 아니라 `-wal` 에만 있어서, 그냥 읽으면 조용히 빠진다
+(실제로 어떤 장비에서 2개월치 299건이 사라졌다).
+
+### `access` — MS Access (.mdb)
+
+```yaml
+read:
+  format: access
+  password_key: cwi_access      # 값은 config/local_secrets.yaml
+  tables: "^LOG_(\d{8})$"      # 이 정규식에 맞는 테이블마다 query 를 돌린다
+  query: |
+    SELECT '{1} ' & [WriteDate] AS ts, [UserID] AS user_id FROM [{table}]
+```
+
+`{table}` 은 테이블 이름, `{1}` 은 정규식이 잡아낸 부분이다.
+**날짜가 어느 칸에도 없고 테이블 이름에만 있는 장비**가 있어서 이렇게 만들었다.
+
+Windows 의 Access ODBC 드라이버가 필요하다 (Python 과 같은 비트수).
+Access SQL 주의: `--` 주석을 못 쓰고, 와일드카드는 `*` 가 아니라 `%` 이며,
+별칭이 원본 컬럼명과 같으면 순환 참조로 거부한다.
+
+**비밀번호는 프로파일에 적지 않는다.** 프로파일 YAML 은 저장소에 올라가기 때문이다.
+
+```yaml
+# config/local_secrets.yaml  (gitignore 대상)
+passwords:
+  cwi_access: "..."
+```
+
 ### 출력 표 (`output`)
 
 컬럼 구성은 장비마다 다르므로 프로파일이 직접 정한다.
@@ -267,7 +316,7 @@ map:
 | `equipment_id` / `source_file` | 어느 장비, 어느 파일 |
 | `raw` | 원본 레코드 전체 (추적성 보존) |
 
-`action` 어휘: `modify` `delete` `create` `login` `login_failed` `sign` `config` `execute` `backup`
+`action` 어휘: `modify` `delete` `create` `login` `login_failed` `sign` `config` `execute` `backup` `operate` `alarm`
 
 > 어휘를 늘릴 때의 기준은 **"규칙이 이 값만 보고 판단할 수 있는가"** 다.
 > 예를 들어 로그인 성공과 실패를 한 값으로 묶으면
@@ -285,8 +334,15 @@ map:
 | `delete_without_reason` | 높음 | `action == delete` 인데 사유가 비어 있음 |
 | `audit_trail_disabled` | 높음 | '감사추적' 낱말과 '끔' 낱말이 함께 나옴 |
 | `system_clock_changed` | 높음 | 이전값·변경값이 **둘 다 시각으로 읽히고** 차이가 큼 |
+| `account_created` | 높음 | 계정 생성 — 곧 접근 권한 부여다 |
+| `account_unlocked` | 높음 | 계정 잠금 해제 — 그 앞에 로그인 실패가 있었다는 흔적 |
 | `after_hours_change` | 보통 | 22~06시의 변경·삭제 |
 | `repeated_login_failure` | 보통 | 같은 사람 이름으로 30분 내 3회 이상 실패 |
+
+낱말로 판단하는 규칙은 **두 갈래를 함께** 본다. 한쪽만 보면 오탐이 난다
+— `unlock` 만 보면 도어 잠금 해제가, `create` 만 보면 프로그램 생성이 걸린다.
+그리고 **컬럼명이 아니라 값만** 본다 (`user_id` 라는 컬럼명 때문에
+모든 행이 계정 관련으로 보인 적이 있다).
 
 `system_clock_changed` 는 낱말이 아니라 **값의 성질**로 판단하므로,
 장비가 그 설정을 뭐라고 부르든 잡힌다. 시각이 바뀌면 그 뒤의 모든 기록이
@@ -384,12 +440,29 @@ python -m src.gui                                   창 프로그램
 **추적성** — 산출물의 아무 행에서나 `원본파일` + `원본줄번호` 로
 원본의 몇 번째 줄인지 되짚을 수 있다.
 
+**설비 구분** — `프로파일`(기종: 이 형식을 어떻게 읽는가)과
+`설비`(호기: 어느 장비에서 나왔는가)는 다르다.
+형식이 같은 설비가 여러 대일 수 있어서 — 실제로 SCADA 두 대가 파일명까지
+같았다 — **파일이 든 폴더 이름을 설비명으로 쓴다.**
+
+```
+data/FIT-I001/2026-01.pdf   → 설비 'FIT-I001'
+data/ATM-I001/SystemLog.db  → 설비 'ATM-I001'
+data/2026-01.pdf            → 'data' 는 통 폴더 → 프로파일 id
+```
+
+어느 경로를 지정하고 실행하든 같은 설비명이 나온다.
+산출물도 설비별로 나뉘고, 중복 제거도 설비를 넘어서 합치지 않는다.
+
+**특정 행위 제외** — `--exclude-action operate` 처럼 공통 어휘로 지정한다.
+장비와 무관하게 걸리므로 어떤 장비에나 같은 방식으로 쓴다.
+
 ---
 
 ## 개발
 
 ```bash
-.venv/Scripts/python.exe -m pytest          # 123 passed, 4 skipped
+.venv/Scripts/python.exe -m pytest          # 160 passed, 10 skipped
 ```
 
 테스트 픽스처(`tests/fixtures/`)는 **합성 데이터**다.

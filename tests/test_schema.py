@@ -83,3 +83,15 @@ def test_raw_text_hides_parser_metadata() -> None:
 def test_raw_must_be_dict() -> None:
     with pytest.raises(SchemaError):
         make(raw=["not", "a", "dict"])
+
+
+def test_raw_values_excludes_column_names() -> None:
+    """낱말로 판단하는 규칙에서 컬럼명이 섞이면 오탐이 난다.
+
+    'user_id' 라는 컬럼명 때문에 모든 행이 '계정 관련'으로 보인 적이 있다.
+    """
+    event = make(raw={"user_id": "op01", "message": "DOORS UNLOCK"})
+    assert "user_id" not in event.raw_values()
+    assert "op01" in event.raw_values()
+    assert "doors unlock" in event.raw_values()
+    assert "user_id" in event.raw_text()      # raw_text 는 컬럼명을 넣는다

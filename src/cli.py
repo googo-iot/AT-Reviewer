@@ -116,6 +116,7 @@ def _execute(args: argparse.Namespace, registry: Registry, files: list[Path]) ->
         files,
         registry,
         dedupe=not args.keep_duplicates,
+        exclude_actions=getattr(args, "exclude_action", []),
         on_file=lambda report: _say(_report_line(report)),
     )
 
@@ -224,6 +225,8 @@ def _print_convert_summary(result: RunResult, written: list[tuple[str, int, Path
     )
     if result.skipped:
         _say(f"무시      {result.skipped:,}건 (페이지 머리글 등 데이터가 아닌 블록)")
+    if result.excluded:
+        _say(f"행위제외  {result.excluded:,}건 (--exclude-action 으로 뺀 것)")
     if result.removed:
         _say(f"중복제거  {len(result.removed):,}건 (내보내기 구간이 겹치는 파일)")
         for line in result.overlaps:
@@ -521,6 +524,13 @@ def _add_common(parser: argparse.ArgumentParser, *, rules: bool) -> None:
         "--keep-duplicates",
         action="store_true",
         help="파일 간 중복을 제거하지 않고 전부 남김",
+    )
+    parser.add_argument(
+        "--exclude-action",
+        action="append",
+        default=[],
+        metavar="행위",
+        help="이 행위는 산출물에서 뺀다 (여러 번 지정 가능). 예: --exclude-action operate",
     )
 
 

@@ -1,0 +1,74 @@
+# 캡슐 계수기(CWI) 로그 — MS Access (.mdb), 비밀번호 있음
+#
+# 이 장비의 까다로운 점 세 가지
+#   1. 날짜가 어느 칸에도 없다. 테이블 이름에만 있다 (LOG_20250103).
+#      WriteDate 는 '12:23:43' 처럼 시각만 담는다.
+#      → read.tables 정규식으로 날짜를 잡아내 질의에 {1} 로 끼워 넣는다.
+#   2. 파일에 비밀번호가 걸려 있다.
+#      → 값은 config/local_secrets.yaml 에 두고 여기서는 이름만 가리킨다.
+#         프로파일 YAML 은 저장소에 올라가므로 비밀번호를 직접 적으면 안 된다.
+#   3. 행위 구분이 Distinction(대분류) 한 칸뿐이라 Operation 안에
+#      단순 버튼 누름과 값 변경이 섞여 있다.
+#      → 이전값이 있으면 값 변경, 없으면 조작으로 갈라낸다.
+
+id: cwi_access
+name: 캡슐 계수기 로그 (Access)
+
+detect:
+  # 날짜별 테이블은 파일마다 다르므로, 항상 있는 두 개로 판별한다.
+  tables: ["Log", "Table_list"]
+
+read:
+  format: access
+  password_key: cwi_access        # 실제 값은 config/local_secrets.yaml
+  tables: "^LOG_(\\d{8})$"        # 이 정규식에 맞는 테이블마다 아래 질의를 돌린다
+  # Access SQL 은 -- 주석을 지원하지 않는다. 설명은 여기 적는다.
+  #   row_id : 같은 초에 같은 조작이 반복되면 이것만이 둘을 가른다.
+  #            없으면 중복 제거가 멀쩡한 기록을 지운다 (실제로 132건 사라졌다).
+  query: |
+    SELECT
+      [id] AS row_id,
+      '{1} ' & [WriteDate] AS ts,
+      IIF([UserID] Is Null Or Trim([UserID])='', '(기록없음)', [UserID]) AS user_id,
+      [Distinction] AS category,
+      [Contents]    AS log_item,
+      [OldValue]    AS old_val,
+      [NewValue]    AS new_val,
+      [ProductName] AS product_txt,
+      [BatchNo]     AS batch_txt,
+      IIF([Distinction]='Login', 'login',
+        IIF([Distinction]='Alarm', 'alarm',
+          IIF([OldValue] Is Null Or Trim([OldValue])='', 'operate', 'value_changed')
+        )
+      ) AS action_code
+    FROM [{table}]
+
+map:
+  timestamp: {column: "ts", format: "%Y%m%d %H:%M:%S"}
+  actor:     {column: "user_id"}
+  action:    {column: "action_code"}
+  target:    {column: "log_item"}
+  old_value: {column: "old_val"}
+  new_value: {column: "new_val"}
+
+vocabulary:
+  action:
+    "login": login          # Login / Logout / Auto Logout
+    "alarm": alarm          # 도어 열림, 비상정지, 모터 트립, 계량 오류
+    "operate": operate      # 버튼 누름 (이전값 없음)
+    "value_changed": modify # 설정값 변경 (이전값 → 변경값)
+
+output:
+  columns:
+    - {name: "발생일시", from: timestamp, format: "%Y-%m-%d %H:%M:%S"}
+    - {name: "행위",     from: action}
+    - {name: "구분",     from: "category"}      # Operation / Alarm / Login
+    - {name: "행위자",   from: actor}
+    - {name: "대상",     from: target}
+    - {name: "이전값",   from: old_value}
+    - {name: "변경값",   from: new_value}
+    - {name: "제품",     from: "product_txt"}       # 이 장비만 갖는 정보
+    - {name: "배치번호", from: "batch_txt"}
+    - {name: "원본테이블", from: "__table__"}
+    - {name: "원본파일", from: source_name}
+    - {name: "원본행번호", from: line}

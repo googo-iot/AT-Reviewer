@@ -1,0 +1,92 @@
+# SCADA(HMI) 시스템 로그 — SQLite (SystemLog.db)
+#
+# 이 장비의 까다로운 점 세 가지
+#   1. LOG_TYPE 이 전부 '8' 이라 행위 구분이 컬럼에 없다.
+#      실제 행위는 LOG_MSG 문장 안에 들어있어 SQL 의 CASE 로 분류한다.
+#   2. 시각이 LOG_DATE(YYYYMMDD) 와 LOG_TIME(HHMMSSmmm) 두 칸으로 쪼개져 있다.
+#      SQL 에서 이어붙여 한 칸으로 만든다.
+#   3. USER_ID 가 1.2% 비어 있다(초기 기록). 공통 스키마는 행위자를 필수로 요구하므로
+#      SQL 에서 '(기록없음)' 으로 채운다. 비워두면 그 행들이 통째로 실패한다.
+#
+# 분류를 Python 이 아니라 SQL 에 둔 이유: 장비별 규칙은 설정파일에 있어야 하기 때문.
+
+id: scada_systemlog
+name: SCADA 시스템 로그
+
+detect:
+  # DB 는 본문을 글자로 훑을 수 없으므로 테이블 이름으로 판별한다.
+  tables: ["TB_SECULOG"]
+
+read:
+  format: sqlite
+  query: |
+    SELECT
+      LOG_DATE || LOG_TIME AS ts,
+      COALESCE(NULLIF(TRIM(USER_ID), ''), '(기록없음)') AS user_id,
+      COALESCE(NULLIF(TRIM(USER_NM), ''), '') AS user_name,
+      LOG_MSG AS message,
+      LOG_TYPE AS log_type,
+      LOG_DATE AS log_date,
+      LOG_TIME AS log_time,
+      CASE
+        WHEN LOG_MSG LIKE 'Login%'                      THEN 'login'
+        WHEN LOG_MSG LIKE 'Logout%'                     THEN 'logout'
+        WHEN LOG_MSG LIKE 'UnLock Login%'               THEN 'account_unlocked'
+        WHEN LOG_MSG LIKE '%Object ID:%'                THEN 'operate'
+        WHEN LOG_MSG LIKE 'Screen change%'              THEN 'screen_change'
+        WHEN LOG_MSG LIKE '%Security Table - New user%'     THEN 'user_created'
+        WHEN LOG_MSG LIKE '%Security Table - Deleted user%' THEN 'user_deleted'
+        WHEN LOG_MSG LIKE '%Security Table%'            THEN 'security_changed'
+        WHEN LOG_MSG LIKE '%Security ID:%'              THEN 'security_changed'
+        WHEN LOG_MSG LIKE '%Scada Project Start%'       THEN 'project_start'
+        WHEN LOG_MSG LIKE '%Scada Project Stop%'        THEN 'project_stop'
+        WHEN LOG_MSG LIKE 'Shutdown%'                   THEN 'shutdown'
+        WHEN LOG_MSG LIKE '%Data Changed%'              THEN 'data_changed'
+        -- 'Data Changed' 없이 '1 --> 0' 만 남은 잘린 기록이 22건 있다.
+        -- 값이 바뀐 기록이 맞으므로 같은 갈래로 본다.
+        WHEN LOG_MSG LIKE '%-->%'                       THEN 'data_changed'
+        ELSE 'other'
+      END AS action_code
+    FROM TB_SECULOG
+    ORDER BY LOG_DATE, LOG_TIME
+
+map:
+  timestamp: {column: "ts", format: "%Y%m%d%H%M%S%f"}
+  actor:     {column: "user_id"}
+  action:    {column: "action_code"}
+  # 대상: 값이 바뀐 항목 이름, 또는 조작한 화면 이름. 둘 다 아니면 메시지 전체.
+  target:
+    column: "message"
+    pattern: "^(.*?)\\s+Data Changed|^(.*?)\\s+Object ID:|^(.*)$"
+  old_value: {column: "message", pattern: "Data Changed\\s+(.*?)\\s+-->"}
+  new_value: {column: "message", pattern: "-->\\s*(.*)$"}
+
+vocabulary:
+  action:
+    "login": login
+    "logout": login
+    "operate": operate            # HMI 버튼 누름 — 43.7% 를 차지한다
+    "screen_change": operate
+    "data_changed": modify
+    "user_created": create
+    "user_deleted": delete        # 계정 삭제 — 사유가 없으면 규칙에 걸린다
+    "security_changed": config    # 권한·비밀번호·보안정책 변경
+    "account_unlocked": config    # 잠긴 계정 해제
+    "project_start": config
+    "project_stop": config
+    "shutdown": config
+    "other": modify               # 값만 남은 잘린 기록
+
+output:
+  columns:
+    - {name: "발생일시",   from: timestamp, format: "%Y-%m-%d %H:%M:%S"}
+    - {name: "행위",       from: action}
+    - {name: "원본구분",   from: "action_code"}
+    - {name: "행위자ID",   from: actor}
+    - {name: "행위자명",   from: "user_name"}
+    - {name: "대상",       from: target}
+    - {name: "이전값",     from: old_value}
+    - {name: "변경값",     from: new_value}
+    - {name: "원본메시지", from: "message"}
+    - {name: "원본파일",   from: source_name}
+    - {name: "원본행번호", from: line}

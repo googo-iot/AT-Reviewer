@@ -35,10 +35,14 @@ from __future__ import annotations
 import csv
 import io
 import re
+import shutil
+import sqlite3
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Final, Iterable, Sequence
+from typing import Any, Final, Iterable, Iterator, Sequence
 
 import yaml
 
@@ -51,8 +55,13 @@ __all__ = [
     "Profile",
     "ProfileError",
     "RowError",
+    "ACCESS_SUFFIXES",
+    "SQLITE_SUFFIXES",
+    "access_table_names",
     "extract_text",
     "load_profiles",
+    "open_access",
+    "open_sqlite",
     "sniff_header",
 ]
 
@@ -96,6 +105,9 @@ DEFAULT_OUTPUT_TIME_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
 
 #: detect 시 훑어볼 파일 앞부분 줄 수.
 DEFAULT_SEARCH_LINES: Final[int] = 10
+
+#: SQLite 파일로 볼 확장자.
+SQLITE_SUFFIXES: Final[tuple[str, ...]] = (".db", ".sqlite", ".sqlite3", ".db3")
 
 #: blocks 형식의 기본 구분선 — 하이픈/en·em 대시/밑줄이 20자 이상 이어지는 줄.
 DEFAULT_BLOCK_SEPARATOR: Final[str] = r"[-–—_=]{20,}"
@@ -247,6 +259,134 @@ def sniff_header(
     return "\n".join(text.splitlines()[:search_lines])
 
 
+#: SQLite 가 본 파일 옆에 두는 부속 파일.
+SQLITE_SIDECARS: Final[tuple[str, ...]] = ("-wal", "-shm", "-journal")
+
+
+@contextmanager
+def open_sqlite(path: Path) -> Iterator[sqlite3.Connection]:
+    """SQLite 를 읽기 위해 연다. 원본 파일은 절대 바뀌지 않는다.
+
+    -wal 파일이 옆에 있으면 최근 기록이 본 파일이 아니라 거기에만 있다.
+    immutable 로 열면 SQLite 가 -wal 을 무시해서 최근 것이 통째로 빠진다
+    (실제로 어떤 장비에서 1,057행만 보이고 뒤쪽 299행 2개월치가 사라졌다).
+    그래서 -wal 이 있으면 한 벌을 임시 폴더로 복사해서 연다.
+    사본이라 SQLite 가 마음대로 정리해도 원본에는 영향이 없다.
+
+    -wal 이 없으면 복사 없이 immutable 로 연다 — 잠금도 걸지 않고 쓰지도 않는다.
+    """
+    sidecars = [
+        path.with_name(path.name + suffix)
+        for suffix in SQLITE_SIDECARS
+        if path.with_name(path.name + suffix).is_file()
+    ]
+    if not sidecars:
+        connection = sqlite3.connect(f"file:{path.as_posix()}?immutable=1", uri=True)
+        try:
+            yield connection
+        finally:
+            connection.close()
+        return
+
+    with tempfile.TemporaryDirectory(prefix="at-reviewer-") as workspace:
+        staged = Path(workspace) / path.name
+        shutil.copy2(path, staged)
+        for sidecar in sidecars:
+            shutil.copy2(sidecar, Path(workspace) / sidecar.name)
+        connection = sqlite3.connect(str(staged))
+        try:
+            yield connection
+        finally:
+            connection.close()
+
+
+#: MS Access 파일로 볼 확장자.
+ACCESS_SUFFIXES: Final[tuple[str, ...]] = (".mdb", ".accdb")
+
+#: Access 를 읽을 ODBC 드라이버 이름의 조각. 설치된 것 중에서 고른다.
+ACCESS_DRIVER_HINT: Final[str] = "microsoft access driver"
+
+
+def _access_driver() -> str:
+    """설치된 Access ODBC 드라이버 이름. 없으면 무엇을 깔아야 하는지 알린다."""
+    try:
+        import pyodbc
+    except ImportError as exc:
+        raise ProfileError(
+            "Access(.mdb) 를 읽으려면 pyodbc 가 필요합니다: pip install pyodbc"
+        ) from exc
+
+    drivers = [d for d in pyodbc.drivers() if ACCESS_DRIVER_HINT in d.lower()]
+    if not drivers:
+        raise ProfileError(
+            "Access ODBC 드라이버가 없습니다.\n"
+            "  'Microsoft Access Database Engine' 재배포 패키지를 설치하세요.\n"
+            "  Python 과 같은 비트수(현재 64bit)여야 합니다."
+        )
+    # .accdb 까지 읽는 최신 드라이버를 먼저 쓴다.
+    drivers.sort(key=lambda d: ("accdb" not in d.lower(), d))
+    return drivers[0]
+
+
+@contextmanager
+def open_access(path: Path, password: str = ""):
+    """Access 파일을 읽기 전용으로 연다.
+
+    비밀번호가 걸린 파일이 흔하다. 값은 프로파일이 아니라
+    config/local_secrets.yaml 에 두고 키로만 참조한다
+    — 프로파일 YAML 은 저장소에 올라가기 때문이다.
+    """
+    import pyodbc
+
+    parts = [f"DRIVER={{{_access_driver()}}}", f"DBQ={path.resolve()}"]
+    if password:
+        parts.append(f"PWD={password}")
+    try:
+        connection = pyodbc.connect(";".join(parts) + ";", readonly=True, timeout=30)
+    except pyodbc.Error as exc:
+        hint = ""
+        if "password" in str(exc).lower() or "암호" in str(exc):
+            hint = (
+                "\n  비밀번호가 틀렸거나 없습니다. "
+                "config/local_secrets.yaml 의 passwords 를 확인하세요."
+            )
+        raise ProfileError(f"Access 파일을 열지 못했습니다: {path.name}{hint}") from exc
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def access_table_names(path: Path, password: str = "") -> tuple[str, ...]:
+    """Access 파일의 테이블 이름. 못 열면 빈 목록 (판별 단계에서 멈추면 안 된다)."""
+    if path.suffix.lower() not in ACCESS_SUFFIXES:
+        return ()
+    try:
+        with open_access(path, password) as connection:
+            cursor = connection.cursor()
+            return tuple(r.table_name for r in cursor.tables(tableType="TABLE"))
+    except Exception:
+        return ()
+
+
+def table_names(path: Path) -> tuple[str, ...]:
+    """SQLite 파일의 테이블·뷰 이름. 장비 판별에 쓴다.
+
+    SQLite 가 아니거나 열 수 없으면 빈 목록을 돌려준다
+    — 판별 단계에서 예외로 멈추면 다른 프로파일까지 검사하지 못한다.
+    """
+    if path.suffix.lower() not in SQLITE_SUFFIXES:
+        return ()
+    try:
+        with open_sqlite(path) as connection:
+            rows = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            ).fetchall()
+        return tuple(row[0] for row in rows)
+    except (sqlite3.Error, OSError):
+        return ()
+
+
 # 이전 이름 호환 (registry 등에서 사용)
 decode_file = extract_text
 
@@ -321,6 +461,12 @@ class Profile:
     # delimited 전용
     delimiter: str = ","
     skip_rows: int = 0
+    # sqlite / access 전용
+    query: str = ""
+    detect_tables: tuple[str, ...] = ()
+    # access 전용
+    table_pattern: str = ""      # 이 정규식에 맞는 테이블마다 query 를 돌린다
+    password_key: str = ""       # config/local_secrets.yaml 에서 찾을 이름
     # blocks 전용
     block_separator: str = DEFAULT_BLOCK_SEPARATOR
     block_fields: tuple[str, ...] = ()
@@ -361,10 +507,16 @@ class Profile:
         header_contains = _as_str_list(
             detect.get("header_contains"), where, "detect.header_contains"
         )
-        if not header_contains:
+        detect_tables = _as_str_list(detect.get("tables"), where, "detect.tables")
+        # sqlite 는 본문을 글자로 훑을 수 없으니 테이블 이름으로 판별한다.
+        wants_tables = str(
+            (raw.get("read") or {}).get("format", "")
+        ).strip().lower() in {"sqlite", "access"}
+        if not header_contains and not (wants_tables and detect_tables):
             raise ProfileError(
-                f"detect.header_contains 가 비어 있습니다{where} — "
-                f"판별 조건이 없으면 아무 파일에나 걸립니다."
+                f"detect 조건이 비어 있습니다{where} — "
+                f"판별 조건이 없으면 아무 파일에나 걸립니다. "
+                f"(sqlite 는 detect.tables, 그 외에는 detect.header_contains)"
             )
         search_lines = int(detect.get("search_lines", DEFAULT_SEARCH_LINES))
 
@@ -373,9 +525,17 @@ class Profile:
         if not isinstance(read, dict):
             raise ProfileError(f"read 는 매핑이어야 합니다{where}")
         read_format = str(read.get("format", "delimited")).strip().lower()
-        if read_format not in {"delimited", "blocks"}:
+        if read_format not in {"delimited", "blocks", "sqlite", "access"}:
             raise ProfileError(
-                f"read.format 은 delimited 또는 blocks 여야 합니다{where}: {read_format}"
+                f"read.format 은 delimited / blocks / sqlite / access 중 하나여야 합니다"
+                f"{where}: {read_format}"
+            )
+
+        query = str(read.get("query") or "").strip()
+        if read_format in {"sqlite", "access"} and not query:
+            raise ProfileError(
+                f"read.query 가 필요합니다{where} — "
+                f"어느 테이블에서 무엇을 꺼낼지 SQL 로 적어야 합니다."
             )
 
         block_fields = _as_str_list(read.get("fields"), where, "read.fields")
@@ -419,6 +579,7 @@ class Profile:
             raise ProfileError(f"map 에 필수 필드가 없습니다{where}: {', '.join(missing)}")
 
         # blocks 는 헤더가 없어 실행 전에 컬럼 검증이 불가능하므로 여기서 잡는다.
+        # (sqlite 는 질의 결과 컬럼으로 읽을 때 검증한다)
         if read_format == "blocks":
             unknown = {
                 f: spec["column"]
@@ -463,6 +624,10 @@ class Profile:
             vocabulary=vocabulary,
             delimiter=_resolve_delimiter(read.get("delimiter")),
             skip_rows=int(read.get("skip_rows", 0) or 0),
+            query=query,
+            detect_tables=detect_tables,
+            table_pattern=str(read.get("tables") or "").strip(),
+            password_key=str(read.get("password_key") or "").strip(),
             block_separator=str(read.get("block_separator") or DEFAULT_BLOCK_SEPARATOR),
             block_fields=block_fields,
             require_fields=_as_str_list(
@@ -521,32 +686,94 @@ class Profile:
         haystack = header_text.lower()
         return all(token.lower() in haystack for token in self.header_contains)
 
+    @property
+    def detect_tokens(self) -> tuple[str, ...]:
+        """이 프로파일의 판별 조건. 형식에 따라 담기는 곳이 다르다.
+
+        DB 는 본문을 글자로 훑을 수 없어 테이블 이름으로 판별한다.
+        바깥에서는 어느 쪽인지 신경 쓰지 않아도 되게 여기서 감춘다.
+        """
+        if self.read_format in {"sqlite", "access"}:
+            return self.detect_tables
+        return self.header_contains
+
+    def available_tables(self, path: Path) -> tuple[str, ...]:
+        """이 프로파일 기준으로 파일에서 읽을 수 있는 테이블 이름."""
+        if self.read_format == "access":
+            return access_table_names(path, self.password())
+        if self.read_format == "sqlite":
+            return table_names(path)
+        return ()
+
+    def password(self) -> str:
+        """비밀번호를 config/local_secrets.yaml 에서 가져온다.
+
+        프로파일 YAML 은 저장소에 올라가므로 값 자체를 여기 적지 않는다.
+        """
+        if not self.password_key or self.source is None:
+            return ""
+        secrets = self.source.parent.parent / "local_secrets.yaml"
+        try:
+            data = yaml.safe_load(secrets.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ProfileError(f"비밀 설정을 읽지 못했습니다: {secrets} ({exc})") from exc
+        value = (data.get("passwords") or {}).get(self.password_key)
+        if value is None:
+            raise ProfileError(
+                f"'{self.password_key}' 비밀번호가 없습니다: {secrets}\n"
+                f"  passwords:\n    {self.password_key}: \"...\"  형태로 추가하세요."
+            )
+        return str(value)
+
     def matches_file(self, path: Path) -> bool:
+        if self.read_format in {"sqlite", "access"}:
+            return self.matches_tables(self.available_tables(path))
         return self.matches(sniff_header(path, self.encoding, self.search_lines))
+
+    def matches_tables(self, names: Iterable[str]) -> bool:
+        available = {n.lower() for n in names}
+        return bool(self.detect_tables) and all(
+            t.lower() in available for t in self.detect_tables
+        )
 
     # -- 파싱 --------------------------------------------------------------
 
     def parse_file(
-        self, path: Path, prepared: tuple[str, str] | None = None
+        self,
+        path: Path,
+        prepared: tuple[str, str] | None = None,
+        equipment_id: str | None = None,
     ) -> ParseResult:
         """파일 하나를 AuditEvent 목록으로 변환한다.
 
-        prepared: 이미 읽어둔 (본문, 인코딩). 판별 단계에서 읽은 것을 넘기면
-        같은 PDF 를 두 번 추출하지 않는다.
+        prepared:     이미 읽어둔 (본문, 인코딩). 판별 단계에서 읽은 것을 넘기면
+                      같은 PDF 를 두 번 추출하지 않는다.
+        equipment_id: 이 파일이 어느 '설비'에서 나왔는지. 안 주면 프로파일 id 를 쓴다.
+                      프로파일은 '이 형식을 어떻게 읽는가'(기종)이고,
+                      설비는 '어느 호기에서 나왔는가'다. 형식이 같은 설비가
+                      여러 대면 이 둘이 갈라져야 산출물에서 구분된다.
 
         레코드 단위 실패는 모아서 보고하고 나머지는 계속 변환한다
         — 한 줄이 깨졌다고 파일 전체를 버리면 분석이 안 된다.
         """
-        text, encoding = prepared if prepared else extract_text(path, self.encoding)
-        result = ParseResult(path=path, profile_id=self.id, encoding=encoding)
-        records = (
-            self._read_blocks(text, result)
-            if self.read_format == "blocks"
-            else self._read_delimited(text, path)
-        )
+        if self.read_format == "access":
+            result = ParseResult(path=path, profile_id=self.id, encoding="access")
+            records = self._read_access(path)
+        elif self.read_format == "sqlite":
+            result = ParseResult(path=path, profile_id=self.id, encoding="sqlite")
+            records = self._read_sqlite(path)
+        else:
+            text, encoding = prepared if prepared else extract_text(path, self.encoding)
+            result = ParseResult(path=path, profile_id=self.id, encoding=encoding)
+            records = (
+                self._read_blocks(text, result)
+                if self.read_format == "blocks"
+                else self._read_delimited(text, path)
+            )
+        label = equipment_id or self.id
         for line_no, row in records:
             try:
-                result.events.append(self._to_event(row, path, line_no))
+                result.events.append(self._to_event(row, path, line_no, label))
             except (SchemaError, ProfileError) as exc:
                 result.errors.append(RowError(line=line_no, message=str(exc), raw=row))
         return result
@@ -591,6 +818,81 @@ class Profile:
             f"프로파일 '{self.id}' 가 요구하는 컬럼이 {path.name} 에 없습니다: {detail}\n"
             f"  파일의 실제 컬럼: {', '.join(fieldnames) or '(없음)'}"
         )
+
+    # -- access ------------------------------------------------------------
+
+    def _read_access(self, path: Path) -> list[tuple[int, dict[str, Any]]]:
+        """테이블 이름 자체가 데이터인 경우를 다룬다.
+
+        이 장비는 날짜별로 테이블을 따로 만든다(LOG_20250103).
+        날짜가 어느 칸에도 없고 테이블 이름에만 있어서,
+        read.tables 정규식에 맞는 테이블마다 질의를 돌리고
+        잡아낸 부분을 {1}, {2} 로 질의에 끼워 넣는다.
+        """
+        pattern = re.compile(self.table_pattern) if self.table_pattern else None
+        records: list[tuple[int, dict[str, Any]]] = []
+        line = 0
+
+        with open_access(path, self.password()) as connection:
+            cursor = connection.cursor()
+            tables = [r.table_name for r in cursor.tables(tableType="TABLE")]
+            targets = [t for t in tables if pattern.match(t)] if pattern else tables
+            if not targets:
+                raise ProfileError(
+                    f"읽을 테이블이 없습니다: {path.name}\n"
+                    f"  read.tables = {self.table_pattern!r} 에 맞는 것이 없습니다.\n"
+                    f"  파일의 테이블: {', '.join(sorted(tables)[:12])}"
+                )
+
+            checked = False
+            for table in sorted(targets):
+                groups = pattern.match(table).groups() if pattern else ()
+                query = self.query.replace("{table}", table)
+                for index, value in enumerate(groups, start=1):
+                    query = query.replace(f"{{{index}}}", str(value))
+                try:
+                    rows = cursor.execute(query)
+                except Exception as exc:
+                    raise ProfileError(
+                        f"질의에 실패했습니다: {path.name} / 테이블 {table}\n"
+                        f"  {exc}\n  프로파일 '{self.id}' 의 read.query 를 확인하세요."
+                    ) from exc
+
+                columns = [d[0] for d in cursor.description or []]
+                if not checked:                 # 컬럼 검증은 한 번이면 된다
+                    self._check_columns(columns, path)
+                    checked = True
+                for row in rows:
+                    line += 1
+                    record = dict(zip(columns, row))
+                    record["__table__"] = table  # 어느 날짜 테이블에서 왔는지
+                    records.append((line, record))
+        return records
+
+    # -- sqlite ------------------------------------------------------------
+
+    def _read_sqlite(self, path: Path) -> list[tuple[int, dict[str, Any]]]:
+        """질의 결과를 레코드 목록으로. 원본 파일은 절대 건드리지 않는다.
+
+        여는 방식은 open_sqlite 가 정한다 — -wal 이 있으면 사본으로,
+        없으면 immutable 로. 자세한 이유는 그쪽 설명 참고.
+        """
+        try:
+            with open_sqlite(path) as connection:
+                cursor = connection.execute(self.query)
+                columns = [d[0] for d in cursor.description or []]
+                self._check_columns(columns, path)
+                return [
+                    (index, dict(zip(columns, row)))
+                    for index, row in enumerate(cursor, start=1)
+                ]
+        except sqlite3.Error as exc:
+            raise ProfileError(
+                f"질의에 실패했습니다: {path.name} ({exc})\n"
+                f"  프로파일 '{self.id}' 의 read.query 를 확인하세요."
+            ) from exc
+        except OSError as exc:
+            raise ProfileError(f"DB 를 열지 못했습니다: {path} ({exc})") from exc
 
     # -- blocks ------------------------------------------------------------
 
@@ -657,7 +959,9 @@ class Profile:
 
     # -- 공통 변환 ---------------------------------------------------------
 
-    def _to_event(self, row: dict[str, Any], path: Path, line_no: int) -> AuditEvent:
+    def _to_event(
+        self, row: dict[str, Any], path: Path, line_no: int, equipment_id: str
+    ) -> AuditEvent:
         values = {f: self._extract(f, spec, row) for f, spec in self.mapping.items()}
 
         timestamp_text = str(values.get("timestamp") or "").strip()
@@ -677,7 +981,7 @@ class Profile:
             old_value=values.get("old_value"),
             new_value=values.get("new_value"),
             reason=values.get("reason"),
-            equipment_id=self.id,
+            equipment_id=equipment_id,
             source_file=str(path),
             # '__' 로 시작하는 키는 파서가 붙인 메타데이터. 원본 필드와 구분된다.
             raw={**row, "__line__": line_no},

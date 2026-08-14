@@ -13,7 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Iterable, Iterator, Sequence
 
-from .profile import ParseResult, Profile, ProfileError, decode_file, load_profiles
+from .profile import (
+    ACCESS_SUFFIXES,
+    SQLITE_SUFFIXES,
+    ParseResult,
+    Profile,
+    ProfileError,
+    decode_file,
+    load_profiles,
+)
 
 __all__ = [
     "AmbiguousProfileError",
@@ -25,7 +33,12 @@ __all__ = [
 ]
 
 #: 폴더를 훑을 때 입력으로 인정할 확장자.
-INPUT_SUFFIXES: Final[tuple[str, ...]] = (".csv", ".tsv", ".txt", ".pdf")
+INPUT_SUFFIXES: Final[tuple[str, ...]] = (
+    ".csv", ".tsv", ".txt", ".pdf", *SQLITE_SUFFIXES, *ACCESS_SUFFIXES,
+)
+
+#: 글자로 훑을 수 없는 형식. 판별을 테이블 이름으로 한다.
+DATABASE_SUFFIXES: Final[tuple[str, ...]] = (*SQLITE_SUFFIXES, *ACCESS_SUFFIXES)
 
 
 class DetectionError(Exception):
@@ -103,11 +116,26 @@ class Registry:
     def inspect(self, path: Path | str) -> list[MatchReport]:
         """모든 프로파일에 대해 일치 상황을 계산한다. 점수 높은 순으로 정렬."""
         target = Path(path)
+        is_database = target.suffix.lower() in DATABASE_SUFFIXES
+
         reports: list[MatchReport] = []
         for profile in self.profiles:
-            header = self._header_text(target, profile).lower()
-            matched = tuple(t for t in profile.header_contains if t.lower() in header)
-            missing = tuple(t for t in profile.header_contains if t.lower() not in header)
+            if profile.read_format in {"sqlite", "access"}:
+                # DB 는 본문을 글자로 훑을 수 없다. 테이블 이름으로 판별한다.
+                # 비밀번호가 필요한 형식이 있어 프로파일별로 물어본다.
+                tables = {n.lower() for n in profile.available_tables(target)}
+                wanted = profile.detect_tables
+                matched = tuple(t for t in wanted if t.lower() in tables)
+                missing = tuple(t for t in wanted if t.lower() not in tables)
+            elif is_database:
+                # 글자 기반 프로파일에 DB 를 들이대면 디코딩만 실패한다. 아예 건너뛴다.
+                matched, missing = (), profile.detect_tokens
+            else:
+                header = self._header_text(target, profile).lower()
+                matched = tuple(t for t in profile.header_contains if t.lower() in header)
+                missing = tuple(
+                    t for t in profile.header_contains if t.lower() not in header
+                )
             reports.append(MatchReport(profile=profile, matched=matched, missing=missing))
         reports.sort(key=lambda r: (r.is_match, r.score), reverse=True)
         return reports
@@ -151,11 +179,11 @@ class Registry:
             source = report.profile.source.name if report.profile.source else "?"
             lines.append(
                 f"    - {report.profile.id} ({source}): "
-                f"header_contains = {list(report.profile.header_contains)}"
+                f"판별조건 = {list(report.profile.detect_tokens)}"
             )
         lines.append(
-            "  → 각 프로파일의 detect.header_contains 에 "
-            "해당 장비에만 있는 컬럼명을 추가해 구분하세요."
+            "  → 각 프로파일의 detect 조건에 "
+            "해당 장비에만 있는 컬럼명/테이블명을 추가해 구분하세요."
         )
         return "\n".join(lines)
 
@@ -172,11 +200,17 @@ class Registry:
 
     # -- 판별 + 파싱 -------------------------------------------------------
 
-    def read(self, path: Path | str) -> tuple[Profile, ParseResult]:
+    def read(
+        self, path: Path | str, equipment_id: str | None = None
+    ) -> tuple[Profile, ParseResult]:
         """판별부터 AuditEvent 변환까지 한 번에. 파일은 한 번만 읽는다."""
         target = Path(path)
         profile = self.identify(target)
-        return profile, profile.parse_file(target, self._read(target, profile))
+        if profile.read_format in {"sqlite", "access"}:   # 미리 읽어둘 본문이 없다
+            return profile, profile.parse_file(target, equipment_id=equipment_id)
+        return profile, profile.parse_file(
+            target, self._read(target, profile), equipment_id=equipment_id
+        )
 
     def parse_file(self, path: Path | str) -> ParseResult:
         return self.read(path)[1]

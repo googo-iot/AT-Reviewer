@@ -44,6 +44,8 @@ ACTIONS: Final[frozenset[str]] = frozenset(
         "config",        # 설정·시스템 변경
         "execute",       # 시험·분석 실행 (대기/시작/완료/중단)
         "backup",        # 백업 / 복원
+        "operate",       # 조작 (HMI 버튼 누름, 화면 전환 등)
+        "alarm",         # 설비 알람 (도어 열림, 비상정지, 모터 트립 등)
     }
 )
 
@@ -140,6 +142,20 @@ class AuditEvent:
     def hour(self) -> int:
         """0-23. 업무시간 외 판정에 쓴다."""
         return self.timestamp.hour
+
+    def raw_values(self) -> str:
+        """원본 행의 '값'만 소문자 한 줄로. 컬럼명은 뺀다.
+
+        raw_text() 는 컬럼명까지 넣는데, 낱말로 판단하는 규칙에서는
+        그것이 오탐을 만든다 — 'user_id' 라는 컬럼명 때문에 모든 행이
+        '계정 관련'으로 보이는 식이다.
+        """
+        parts = [
+            str(value)
+            for key, value in self.raw.items()
+            if not str(key).startswith("__") and value is not None
+        ]
+        return " ".join(parts).lower()
 
     def raw_text(self) -> str:
         """원본 행 전체를 소문자 한 줄로. 키워드 검색형 규칙이 사용한다.
